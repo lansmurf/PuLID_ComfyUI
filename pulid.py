@@ -356,7 +356,7 @@ class ApplyPulid_v1_1:
     FUNCTION = "apply_pulid"
     CATEGORY = "pulid"
 
-    def apply_pulid(self, model, pulid, eva_clip, face_analysis, image, weight, start_at, end_at, method=None, noise=0.0, fidelity=None, projection=None, attn_mask=None):
+    def apply_pulid(self, model, pulid, eva_clip, face_analysis, image, weight, start_at, end_at, method=None, noise=0.0, fidelity=None, projection=None, attn_mask=None, image_1=None, image_2=None, image_3=None):
         work_model = model.clone()
         
         device = comfy.model_management.get_torch_device()
@@ -390,8 +390,22 @@ class ApplyPulid_v1_1:
         if fidelity is not None:
             num_zero = fidelity
 
-        #face_analysis.det_model.input_size = (640,640)
-        image = tensor_to_image(image)
+        # Convert the primary 'image' and optional 'image_1', 'image_2', 'image_3' into a batch
+        images_to_process = [image]  # 'image' is required, so it must be present
+        if image_1 is not None:
+            images_to_process.append(image_1)
+        if image_2 is not None:
+            images_to_process.append(image_2)
+        if image_3 is not None:
+            images_to_process.append(image_3)
+
+        # Now 'images_to_process' is a list of tensors, each shaped [1, H, W, C].
+        # Concatenate them along the batch dimension to get [N, H, W, C].
+        image_batch = torch.cat(images_to_process, dim=0)
+
+        # Now we can run the rest of the code using image_batch instead of image
+        # Because the original code expects `image` to have shape [N, H, W, C] when looping over
+        image = tensor_to_image(image_batch)  # This will now return a numpy array with shape [N, H, W, C]
 
         face_helper = FaceRestoreHelper(
             upscale_factor=1,
@@ -406,8 +420,10 @@ class ApplyPulid_v1_1:
         face_helper.face_parse = init_parsing_model(model_name='bisenet', device=device)
 
         bg_label = [0, 16, 18, 7, 8, 9, 14, 15]
-        cond = []
-        uncond = []
+        cond_list = []
+        uncond_list = []
+        vit_hidden_list_cond = []
+        vit_hidden_list_uncond = []
 
         for i in range(image.shape[0]):
             # get insightface embeddings
@@ -433,7 +449,7 @@ class ApplyPulid_v1_1:
             if len(face_helper.cropped_faces) == 0:
                 # No face detected, skip this image
                 continue
-            
+
             face = face_helper.cropped_faces[0]
             face = image_to_tensor(face).unsqueeze(0).permute(0,3,1,2).to(device)
             parsing_out = face_helper.face_parse(T.functional.normalize(face, [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]))[0]
@@ -441,10 +457,9 @@ class ApplyPulid_v1_1:
             bg = sum(parsing_out == i for i in bg_label).bool()
             white_image = torch.ones_like(face)
             face_features_image = torch.where(bg, white_image, to_gray(face))
-            # apparently MPS only supports NEAREST interpolation?
             face_features_image = T.functional.resize(face_features_image, eva_clip.image_size, T.InterpolationMode.BICUBIC if 'cuda' in device.type else T.InterpolationMode.NEAREST).to(device, dtype=dtype)
             face_features_image = T.functional.normalize(face_features_image, eva_clip.image_mean, eva_clip.image_std)
-            
+
             id_cond_vit, id_vit_hidden = eva_clip(face_features_image, return_all_features=False, return_hidden=True, shuffle=False)
             id_cond_vit = id_cond_vit.to(device, dtype=dtype)
             for idx in range(len(id_vit_hidden)):
@@ -464,33 +479,35 @@ class ApplyPulid_v1_1:
                     id_vit_hidden_uncond.append(torch.zeros_like(id_vit_hidden[idx]))
                 else:
                     id_vit_hidden_uncond.append(torch.rand_like(id_vit_hidden[idx]) * noise)
-            
-            cond.append(pulid_model.get_image_embeds(id_cond, id_vit_hidden))
-            uncond.append(pulid_model.get_image_embeds(id_uncond, id_vit_hidden_uncond))
 
-        if not cond:
-            # No faces detected, return the original model
-            print("pulid warning: No faces detected in any of the given images, returning unmodified model.")
+            cond_list.append(id_cond)
+            uncond_list.append(id_uncond)
+            vit_hidden_list_cond.append(id_vit_hidden)
+            vit_hidden_list_uncond.append(id_vit_hidden_uncond)
+
+        if len(cond_list) == 0:
+            print("No faces detected, returning original model.")
             return (work_model,)
-        
-        # average embeddings
-        cond = torch.cat(cond).to(device, dtype=dtype)
-        uncond = torch.cat(uncond).to(device, dtype=dtype)
-        if cond.shape[0] > 1:
-            cond = torch.mean(cond, dim=0, keepdim=True)
-            uncond = torch.mean(uncond, dim=0, keepdim=True)
 
-        if num_zero > 0:
-            if noise == 0:
-                zero_tensor = torch.zeros((cond.size(0), num_zero, cond.size(-1)), dtype=dtype, device=device)
-            else:
-                zero_tensor = torch.rand((cond.size(0), num_zero, cond.size(-1)), dtype=dtype, device=device) * noise
-            cond = torch.cat([cond, zero_tensor], dim=1)
-            uncond = torch.cat([uncond, zero_tensor], dim=1)
+        id_cond_all = torch.stack(cond_list, dim=1).to(device, dtype=dtype)      # [1, num_images, emb_dim]
+        id_uncond_all = torch.stack(uncond_list, dim=1).to(device, dtype=dtype)  # [1, num_images, emb_dim]
 
+        id_vit_hidden_cond_all = []
+        id_vit_hidden_uncond_all = []
+        for layer_idx in range(len(vit_hidden_list_cond[0])):
+            layer_cond = torch.cat([x[layer_idx] for x in vit_hidden_list_cond], dim=1)
+            layer_uncond = torch.cat([x[layer_idx] for x in vit_hidden_list_uncond], dim=1)
+            id_vit_hidden_cond_all.append(layer_cond.to(device, dtype=dtype))
+            id_vit_hidden_uncond_all.append(layer_uncond.to(device, dtype=dtype))
+
+        # Now call get_image_embeds only once
+        cond = pulid_model.get_image_embeds(id_cond_all, id_vit_hidden_cond_all)
+        uncond = pulid_model.get_image_embeds(id_uncond_all, id_vit_hidden_uncond_all)
+
+        # Continue as usual with sigma_start, sigma_end, patching, etc.
         sigma_start = work_model.get_model_object("model_sampling").percent_to_sigma(start_at)
         sigma_end = work_model.get_model_object("model_sampling").percent_to_sigma(end_at)
-
+        
         patch_kwargs = {
             "pulid": pulid_model,
             "weight": weight,
