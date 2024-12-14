@@ -556,9 +556,9 @@ class ApplyPulidAdvanced_v1_1(ApplyPulid_v1_1):
                 "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
             },
             "optional": {
-                "view_image_1": ("IMAGE", ),
-                "view_image_2": ("IMAGE", ),
-                "view_image_3": ("IMAGE", ),
+                "image_1": ("IMAGE", ),
+                "image_2": ("IMAGE", ),
+                "image_3": ("IMAGE", ),
                 "attn_mask": ("MASK", ),
             }
         }
