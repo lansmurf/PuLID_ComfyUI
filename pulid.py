@@ -14,6 +14,7 @@ from comfy.ldm.modules.attention import optimized_attention
 from .eva_clip.constants import OPENAI_DATASET_MEAN, OPENAI_DATASET_STD
 
 from .encoders import IDEncoder
+from .encoders_transformer import IDFormer
 
 INSIGHTFACE_DIR = os.path.join(folder_paths.models_dir, "insightface")
 
@@ -34,7 +35,7 @@ class PulidModel(nn.Module):
         self.ip_layers = To_KV(model["ip_adapter"])
     
     def init_id_adapter(self):
-        image_proj_model = IDEncoder()
+        image_proj_model = IDFormer()
         return image_proj_model
 
     def get_image_embeds(self, face_embed, clip_embeds):
@@ -294,7 +295,7 @@ class ApplyPulid:
     FUNCTION = "apply_pulid"
     CATEGORY = "pulid"
 
-    def apply_pulid(self, model, pulid, eva_clip, face_analysis, image, weight, start_at, end_at, method=None, noise=0.0, fidelity=None, projection=None, attn_mask=None):
+    def apply_pulid(self, model, pulid, eva_clip, face_analysis, image, weight, start_at, end_at, method=None, noise=0.0, fidelity=None, projection=None, attn_mask=None, view_image_1=None, view_image_2=None, view_image_3=None):
         work_model = model.clone()
         
         device = comfy.model_management.get_torch_device()
@@ -329,7 +330,10 @@ class ApplyPulid:
             num_zero = fidelity
 
         #face_analysis.det_model.input_size = (640,640)
-        image = tensor_to_image(image)
+        image_list = [tensor_to_image(image)]
+        for view_img in [view_image_1, view_image_2, view_image_3]:
+            if view_img is not None:
+                image_list.append(tensor_to_image(view_img))
 
         face_helper = FaceRestoreHelper(
             upscale_factor=1,
@@ -347,12 +351,15 @@ class ApplyPulid:
         cond = []
         uncond = []
 
-        for i in range(image.shape[0]):
+        id_cond_list = []
+        id_vit_hidden_list = []
+
+        for i, img in enumerate(image_list):
             # get insightface embeddings
             iface_embeds = None
             for size in [(size, size) for size in range(640, 256, -64)]:
                 face_analysis.det_model.input_size = size
-                face = face_analysis.get(image[i])
+                face = face_analysis.get(img)
                 if face:
                     face = sorted(face, key=lambda x: (x.bbox[2] - x.bbox[0]) * (x.bbox[3] - x.bbox[1]))[-1]
                     iface_embeds = torch.from_numpy(face.embedding).unsqueeze(0).to(device, dtype=dtype)
@@ -364,7 +371,7 @@ class ApplyPulid:
 
             # get eva_clip embeddings
             face_helper.clean_all()
-            face_helper.read_image(image[i])
+            face_helper.read_image(img)
             face_helper.get_face_landmarks_5(only_center_face=True)
             face_helper.align_warp_face()
 
@@ -392,32 +399,30 @@ class ApplyPulid:
 
             # combine embeddings
             id_cond = torch.cat([iface_embeds, id_cond_vit], dim=-1)
-            if noise == 0:
-                id_uncond = torch.zeros_like(id_cond)
-            else:
-                id_uncond = torch.rand_like(id_cond) * noise
-            id_vit_hidden_uncond = []
-            for idx in range(len(id_vit_hidden)):
-                if noise == 0:
-                    id_vit_hidden_uncond.append(torch.zeros_like(id_vit_hidden[idx]))
-                else:
-                    id_vit_hidden_uncond.append(torch.rand_like(id_vit_hidden[idx]) * noise)
-            
-            cond.append(pulid_model.get_image_embeds(id_cond, id_vit_hidden))
-            uncond.append(pulid_model.get_image_embeds(id_uncond, id_vit_hidden_uncond))
-
-        if not cond:
-            # No faces detected, return the original model
+            id_cond_list.append(id_cond)
+            id_vit_hidden_list.append(id_vit_hidden)
+        if not id_cond_list:
             print("pulid warning: No faces detected in any of the given images, returning unmodified model.")
             return (work_model,)
-        
-        # average embeddings
-        cond = torch.cat(cond).to(device, dtype=dtype)
-        uncond = torch.cat(uncond).to(device, dtype=dtype)
-        if cond.shape[0] > 1:
-            cond = torch.mean(cond, dim=0, keepdim=True)
-            uncond = torch.mean(uncond, dim=0, keepdim=True)
 
+        # Create single unconditional
+        id_uncond = torch.zeros_like(id_cond_list[0])
+        id_vit_hidden_uncond = []
+        for layer_idx in range(len(id_vit_hidden_list[0])):
+            id_vit_hidden_uncond.append(torch.zeros_like(id_vit_hidden_list[0][layer_idx]))
+
+        # Stack conditions and combine hidden states
+        id_cond = torch.stack(id_cond_list, dim=1)
+        id_vit_hidden = id_vit_hidden_list[0]
+        for i in range(1, len(id_vit_hidden_list)):
+            for j, x in enumerate(id_vit_hidden_list[i]):
+                id_vit_hidden[j] = torch.cat([id_vit_hidden[j], x], dim=1)
+
+        # Get embeddings through IDFormer once
+        cond = pulid_model.get_image_embeds(id_cond, id_vit_hidden)
+        uncond = pulid_model.get_image_embeds(id_uncond, id_vit_hidden_uncond)
+
+        # Add zero padding
         if num_zero > 0:
             if noise == 0:
                 zero_tensor = torch.zeros((cond.size(0), num_zero, cond.size(-1)), dtype=dtype, device=device)
@@ -471,16 +476,17 @@ class ApplyPulidAdvanced(ApplyPulid):
                 "eva_clip": ("EVA_CLIP", ),
                 "face_analysis": ("FACEANALYSIS", ),
                 "image": ("IMAGE", ),
+                "method": (["fidelity", "style", "neutral"],),
                 "weight": ("FLOAT", {"default": 1.0, "min": -1.0, "max": 5.0, "step": 0.05 }),
-                "projection": (["ortho_v2", "ortho", "none"],),
-                "fidelity": ("INT", {"default": 8, "min": 0, "max": 32, "step": 1 }),
-                "noise": ("FLOAT", {"default": 0.0, "min": -1.0, "max": 1.0, "step": 0.1 }),
                 "start_at": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
                 "end_at": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.001 }),
             },
             "optional": {
+                "view_image_1": ("IMAGE", ),
+                "view_image_2": ("IMAGE", ),
+                "view_image_3": ("IMAGE", ),
                 "attn_mask": ("MASK", ),
-            },
+            }
         }
 
 NODE_CLASS_MAPPINGS = {
