@@ -259,7 +259,7 @@ class PulidModelLoader_v1_0:
                     new_k = f"{layer_num}.to_v_ip.weight"
                 converted_model["ip_adapter"][new_k] = v
 
-        return (PulidModel(converted_model),)
+        return (PulidModel_0(converted_model),)
 
 class PulidModelLoader_v1_1:
     @classmethod
