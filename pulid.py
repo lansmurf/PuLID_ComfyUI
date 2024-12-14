@@ -196,7 +196,7 @@ def to_gray(img):
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 """
 
-class PulidModelLoader:
+class PulidModelLoader_v1_1:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": { "pulid_file": (folder_paths.get_filename_list("pulid"), )}}
@@ -229,7 +229,7 @@ class PulidModelLoader:
 
         return (PulidModel(converted_model),)
 
-class PulidInsightFaceLoader:
+class PulidInsightFaceLoader_v1_1:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -248,7 +248,7 @@ class PulidInsightFaceLoader:
 
         return (model,)
 
-class PulidEvaClipLoader:
+class PulidEvaClipLoader_v1_1:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -276,7 +276,7 @@ class PulidEvaClipLoader:
         return (model,)
 
 
-class ApplyPulid:
+class ApplyPulid_v1_1:
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -471,7 +471,7 @@ class ApplyPulid:
 
         return (work_model,)
 
-class ApplyPulidAdvanced(ApplyPulid):
+class ApplyPulidAdvanced_v1_1(ApplyPulid_v1_1):
     @classmethod
     def INPUT_TYPES(s):
         return {
@@ -495,17 +495,17 @@ class ApplyPulidAdvanced(ApplyPulid):
         }
 
 NODE_CLASS_MAPPINGS = {
-    "PulidModelLoader": PulidModelLoader,
-    "PulidInsightFaceLoader": PulidInsightFaceLoader,
-    "PulidEvaClipLoader": PulidEvaClipLoader,
-    "ApplyPulid": ApplyPulid,
-    "ApplyPulidAdvanced": ApplyPulidAdvanced,
+    "PulidModelLoader_v1_1": PulidModelLoader_v1_1,
+    "PulidInsightFaceLoader_v1_1": PulidInsightFaceLoader_v1_1,
+    "PulidEvaClipLoader_v1_1": PulidEvaClipLoader_v1_1,
+    "ApplyPulid_v1_1": ApplyPulid_v1_1,
+    "ApplyPulidAdvanced_v1_1": ApplyPulidAdvanced_v1_1,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "PulidModelLoader": "Load PuLID Model",
-    "PulidInsightFaceLoader": "Load InsightFace (PuLID)",
-    "PulidEvaClipLoader": "Load Eva Clip (PuLID)",
-    "ApplyPulid": "Apply PuLID",
-    "ApplyPulidAdvanced": "Apply PuLID Advanced",
+    "PulidModelLoader_v1_1": "Load PuLID v1.1 Model",
+    "PulidInsightFaceLoader_v1_1": "Load InsightFace (PuLID v1.1)",
+    "PulidEvaClipLoader_v1_1": "Load Eva Clip (PuLID v1.1)",
+    "ApplyPulid_v1_1": "Apply PuLID v1.1",
+    "ApplyPulidAdvanced_v1_1": "Apply PuLID v1.1 Advanced",
 }
