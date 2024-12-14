@@ -25,6 +25,23 @@ else:
     current_paths, _ = folder_paths.folder_names_and_paths["pulid"]
 folder_paths.folder_names_and_paths["pulid"] = (current_paths, folder_paths.supported_pt_extensions)
 
+class PulidModel_0(nn.Module):
+    def __init__(self, model):
+        super().__init__()
+
+        self.model = model
+        self.image_proj_model = self.init_id_adapter()
+        self.image_proj_model.load_state_dict(model["image_proj"])
+        self.ip_layers = To_KV(model["ip_adapter"])
+    
+    def init_id_adapter(self):
+        image_proj_model = IDEncoder()
+        return image_proj_model
+
+    def get_image_embeds(self, face_embed, clip_embeds):
+        embeds = self.image_proj_model(face_embed, clip_embeds)
+        return embeds
+
 class PulidModel(nn.Module):
     def __init__(self, model):
         super().__init__()
@@ -207,6 +224,42 @@ def to_gray(img):
  Nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 """
+
+class PulidModelLoader_v1_0:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": { "pulid_file": (folder_paths.get_filename_list("pulid"), )}}
+
+    RETURN_TYPES = ("PULID",)
+    FUNCTION = "load_model"
+    CATEGORY = "pulid"
+
+    def load_model(self, pulid_file):
+        ckpt_path = folder_paths.get_full_path("pulid", pulid_file)
+        model = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
+        
+        # Convert v1.1 format to match IP-Adapter format
+        converted_model = {
+            "image_proj": {},
+            "ip_adapter": {}
+        }
+        
+        for k, v in model.items():
+            if k.startswith('id_adapter.'):
+                # id_adapter -> image_proj
+                new_k = k.replace('id_adapter.', '')
+                converted_model["image_proj"][new_k] = v
+            elif k.startswith('id_adapter_attn_layers.'):
+                # id_adapter_attn_layers.X.id_to_k -> ip_adapter.X.to_k_ip
+                parts = k.split('.')
+                layer_num = parts[1]
+                if 'id_to_k' in k:
+                    new_k = f"{layer_num}.to_k_ip.weight"
+                elif 'id_to_v' in k:
+                    new_k = f"{layer_num}.to_v_ip.weight"
+                converted_model["ip_adapter"][new_k] = v
+
+        return (PulidModel(converted_model),)
 
 class PulidModelLoader_v1_1:
     @classmethod
@@ -510,6 +563,7 @@ class ApplyPulidAdvanced_v1_1(ApplyPulid_v1_1):
         }
 
 NODE_CLASS_MAPPINGS = {
+    "PulidModelLoader_v1_0": PulidModelLoader_v1_0,
     "PulidModelLoader_v1_1": PulidModelLoader_v1_1,
     "PulidInsightFaceLoader_v1_1": PulidInsightFaceLoader_v1_1,
     "PulidEvaClipLoader_v1_1": PulidEvaClipLoader_v1_1,
@@ -518,6 +572,7 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "PulidModelLoader_v1_0": "Load PuLID v1.0 Model",
     "PulidModelLoader_v1_1": "Load PuLID v1.1 Model",
     "PulidInsightFaceLoader_v1_1": "Load InsightFace (PuLID v1.1)",
     "PulidEvaClipLoader_v1_1": "Load Eva Clip (PuLID v1.1)",
