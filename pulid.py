@@ -207,22 +207,27 @@ class PulidModelLoader:
 
     def load_model(self, pulid_file):
         ckpt_path = folder_paths.get_full_path("pulid", pulid_file)
-
         model = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
-
-        if ckpt_path.lower().endswith(".safetensors"):
-            st_model = {"image_proj": {}, "ip_adapter": {}}
-            for key in model.keys():
-                if key.startswith("image_proj."):
-                    st_model["image_proj"][key.replace("image_proj.", "")] = model[key]
-                elif key.startswith("ip_adapter."):
-                    st_model["ip_adapter"][key.replace("ip_adapter.", "")] = model[key]
-            model = st_model
         
-        # Also initialize the model, takes longer to load but then it doesn't have to be done every time you change parameters in the apply node
-        model = PulidModel(model)
+        # Convert v1.1 format to match IP-Adapter format if needed
+        converted_model = {}
+        
+        for k, v in model.items():
+            if k.startswith('id_adapter.'):
+                # id_adapter -> image_proj
+                new_k = k.replace('id_adapter.', 'image_proj.')
+                converted_model[new_k] = v
+            elif k.startswith('id_adapter_attn_layers.'):
+                # id_adapter_attn_layers.X.id_to_k -> ip_adapter.X.to_k_ip
+                parts = k.split('.')
+                layer_num = parts[1]
+                if 'id_to_k' in k:
+                    new_k = f"ip_adapter.{layer_num}.to_k_ip.weight"
+                elif 'id_to_v' in k:
+                    new_k = f"ip_adapter.{layer_num}.to_v_ip.weight"
+                converted_model[new_k] = v
 
-        return (model,)
+        return (PulidModel(converted_model),)
 
 class PulidInsightFaceLoader:
     @classmethod
