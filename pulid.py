@@ -122,9 +122,9 @@ class Attn2Replace:
         sigma = extra_options["sigmas"].detach().cpu()[0].item() if 'sigmas' in extra_options else 999999999.9
 
         for i, callback in enumerate(self.callback):
-            if sigma <= self.kwargs[i]["sigma_start"] and sigma >= self.kwargs[i]["sigma_end"]:
+            if sigma >= self.kwargs[i]["sigma_start"] and sigma <= self.kwargs[i]["sigma_end"]:
                 out = out + callback(out, q, k, v, extra_options, **self.kwargs[i])
-        
+                    
         return out.to(dtype=dtype)
 
 def pulid_attention(out, q, k, v, extra_options, module_key='', pulid=None, cond=None, uncond=None, weight=1.0, ortho=False, ortho_v2=False, mask=None, **kwargs):
