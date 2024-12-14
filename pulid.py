@@ -52,9 +52,21 @@ class To_KV(nn.Module):
             self.to_kvs[key.replace(".weight", "").replace(".", "_")].weight.data = value
 
 def tensor_to_image(tensor):
-    image = tensor.mul(255).clamp(0, 255).byte().cpu()
-    image = image[..., [2, 1, 0]].numpy()
-    return image
+    """Convert a PyTorch tensor to a numpy image array."""
+    # Handle batched and unbatched inputs
+    if tensor.ndim == 4:  # Batched [B, C, H, W]
+        tensor = tensor[0]  # Take first image
+    elif tensor.ndim != 3:  # Not [C, H, W]
+        raise ValueError(f"Unexpected tensor dimensions: {tensor.shape}")
+    
+    # Convert to numpy and move channels last [H, W, C]
+    img = tensor.permute(1, 2, 0).cpu()
+    img = img.mul(255).clamp(0, 255).byte().numpy()
+    
+    # Convert RGB to BGR for OpenCV
+    img = img[..., [2, 1, 0]]
+    
+    return img
 
 def image_to_tensor(image):
     tensor = torch.clamp(torch.from_numpy(image).float() / 255., 0, 1)
