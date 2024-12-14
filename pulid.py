@@ -209,23 +209,26 @@ class PulidModelLoader_v1_1:
         ckpt_path = folder_paths.get_full_path("pulid", pulid_file)
         model = comfy.utils.load_torch_file(ckpt_path, safe_load=True)
         
-        # Convert v1.1 format to match IP-Adapter format if needed
-        converted_model = {}
+        # Convert v1.1 format to match IP-Adapter format
+        converted_model = {
+            "image_proj": {},
+            "ip_adapter": {}
+        }
         
         for k, v in model.items():
             if k.startswith('id_adapter.'):
                 # id_adapter -> image_proj
-                new_k = k.replace('id_adapter.', 'image_proj.')
-                converted_model[new_k] = v
+                new_k = k.replace('id_adapter.', '')
+                converted_model["image_proj"][new_k] = v
             elif k.startswith('id_adapter_attn_layers.'):
                 # id_adapter_attn_layers.X.id_to_k -> ip_adapter.X.to_k_ip
                 parts = k.split('.')
                 layer_num = parts[1]
                 if 'id_to_k' in k:
-                    new_k = f"ip_adapter.{layer_num}.to_k_ip.weight"
+                    new_k = f"{layer_num}.to_k_ip.weight"
                 elif 'id_to_v' in k:
-                    new_k = f"ip_adapter.{layer_num}.to_v_ip.weight"
-                converted_model[new_k] = v
+                    new_k = f"{layer_num}.to_v_ip.weight"
+                converted_model["ip_adapter"][new_k] = v
 
         return (PulidModel(converted_model),)
 
