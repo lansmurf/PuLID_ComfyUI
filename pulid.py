@@ -141,12 +141,10 @@ def pulid_attention(out, q, k, v, extra_options, module_key='', pulid=None, cond
     dtype = q.dtype
     seq_len = q.shape[1]
     cond_or_uncond = extra_options["cond_or_uncond"]
-    print("COND OR UNCOND")
-    print(cond_or_uncond)
     b = q.shape[0]
     batch_prompt = b // len(cond_or_uncond)
     _, _, oh, ow = extra_options["original_shape"]
-    
+
     k_cond = pulid.ip_layers.to_kvs[k_key](cond).repeat(batch_prompt, 1, 1)
     k_uncond = pulid.ip_layers.to_kvs[k_key](uncond).repeat(batch_prompt, 1, 1)
     v_cond = pulid.ip_layers.to_kvs[v_key](cond).repeat(batch_prompt, 1, 1)
@@ -154,19 +152,10 @@ def pulid_attention(out, q, k, v, extra_options, module_key='', pulid=None, cond
     ip_k = torch.cat([(k_cond, k_uncond)[i] for i in cond_or_uncond], dim=0)
     ip_v = torch.cat([(v_cond, v_uncond)[i] for i in cond_or_uncond], dim=0)
 
-    print(f"q: {q.shape}")
-
-    print(f"k_cond: {k_cond.shape}")
-    print(f"k_uncond: {k_uncond.shape}")
-    print(f"v_cond: {v_cond.shape}")
-    print(f"v_uncond: {v_uncond.shape}")
-
-    print(f"ip_k: {ip_k.shape}")
-    print(f"ip_v: {ip_v.shape}")
-
     out_ip = optimized_attention(q, ip_k, ip_v, extra_options["n_heads"])
-    
-    print(f"out_ip: {out_ip.shape}")
+
+    print(f"Block Info - cond_or_uncond: {cond_or_uncond}, query: {q.shape}, k/v_cond: {k_cond.shape}, k/v_uncond: {k_uncond.shape}")
+    print(f"After cat - ip_k/v: {ip_k.shape}, out_ip: {out_ip.shape}")
 
     if ortho:
         out = out.to(dtype=torch.float32)
