@@ -165,7 +165,9 @@ def pulid_attention(out, q, k, v, extra_options, module_key='', pulid=None, cond
     print(f"ip_v: {ip_v.shape}")
 
     out_ip = optimized_attention(q, ip_k, ip_v, extra_options["n_heads"])
-        
+    
+    print(f"out_ip: {out_ip.shape}")
+
     if ortho:
         out = out.to(dtype=torch.float32)
         out_ip = out_ip.to(dtype=torch.float32)
@@ -185,6 +187,7 @@ def pulid_attention(out, q, k, v, extra_options, module_key='', pulid=None, cond
         out_ip = out_ip * weight
 
     if mask is not None:
+        print(f"USING MASK")
         mask_h = oh / math.sqrt(oh * ow / seq_len)
         mask_h = int(mask_h) + int((seq_len % int(mask_h)) != 0)
         mask_w = seq_len // mask_h
